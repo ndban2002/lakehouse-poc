@@ -1,0 +1,19 @@
+name: lakehouse_semantic
+version: 1.0.0
+config-version: 2
+
+profile: lakehouse_semantic
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+models:
+  lakehouse_semantic:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table

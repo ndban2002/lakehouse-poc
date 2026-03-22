@@ -1,0 +1,18 @@
+semantic_models:
+  - name: customer_daily_net_amount
+    description: Daily net transaction amount by customer from raw banking transactions.
+    model: ref('fct_customer_daily_net_amount')
+    entities:
+      - name: customer
+        type: primary
+        expr: customer_id
+    dimensions:
+      - name: txn_day
+        type: time
+        type_params:
+          time_granularity: day
+    measures:
+      - name: total_net_amount
+        description: Sum of net transaction amount for valid SUCCESS transactions.
+        agg: sum
+        expr: net_amount

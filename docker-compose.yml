@@ -1,0 +1,122 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: lhp-postgres
+    environment:
+      POSTGRES_DB: source_db
+      POSTGRES_USER: source_user
+      POSTGRES_PASSWORD: source_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./init/postgres:/docker-entrypoint-initdb.d
+
+  minio:
+    image: minio/minio:latest
+    container_name: lhp-minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: lhp-minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until /usr/bin/mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 2; done;
+      /usr/bin/mc mb -p local/lakehouse || true;
+      /usr/bin/mc mb -p local/warehouse || true;
+      /usr/bin/mc anonymous set private local/lakehouse;
+      /usr/bin/mc anonymous set private local/warehouse;
+      exit 0;
+      "
+
+  iceberg-rest:
+    image: tabulario/iceberg-rest:latest
+    container_name: lhp-iceberg-rest
+    depends_on:
+      - minio
+      - minio-init
+    environment:
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_REGION: us-east-1
+      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH_STYLE_ACCESS: true
+      CATALOG_S3_ACCESS_KEY_ID: minioadmin
+      CATALOG_S3_SECRET_ACCESS_KEY: minioadmin
+    ports:
+      - "8181:8181"
+
+  trino:
+    image: trinodb/trino:445
+    container_name: lhp-trino
+    depends_on:
+      - iceberg-rest
+      - minio
+    ports:
+      - "8085:8080"
+    volumes:
+      - ./trino/etc:/etc/trino
+      - ./trino/catalog:/etc/trino/catalog
+
+  airflow:
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
+    container_name: lhp-airflow
+    depends_on:
+      - postgres
+      - minio
+      - minio-init
+      - iceberg-rest
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__FERNET_KEY: ""
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
+      AIRFLOW_UID: "50000"
+      SOURCE_DB_HOST: postgres
+      SOURCE_DB_PORT: "5432"
+      SOURCE_DB_NAME: source_db
+      SOURCE_DB_USER: source_user
+      SOURCE_DB_PASSWORD: source_pass
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      ICEBERG_REST_URI: http://iceberg-rest:8181
+      AWS_REGION: us-east-1
+    command: >
+      bash -c "airflow db migrate && airflow users create --username admin --firstname admin --lastname admin --role Admin --email admin@example.com --password admin || true; airflow standalone"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./ingestion:/opt/airflow/ingestion
+      - ./spark/jobs:/opt/airflow/spark/jobs
+
+  dbt:
+    build:
+      context: ./dbt
+      dockerfile: Dockerfile
+    container_name: lhp-dbt
+    depends_on:
+      - trino
+    working_dir: /usr/app
+    command: tail -f /dev/null
+    volumes:
+      - ./dbt:/usr/app
+
+volumes:
+  minio_data:

@@ -1,0 +1,18 @@
+version: 2
+
+models:
+  - name: stg_transactions_raw
+    description: Raw banking transactions landed in Iceberg
+    columns:
+      - name: raw_id
+        tests: [not_null, unique]
+      - name: customer_id
+        tests: [not_null]
+
+  - name: fct_customer_daily_net_amount
+    description: Daily net amount by customer for valid SUCCESS transactions
+    columns:
+      - name: txn_day
+        tests: [not_null]
+      - name: customer_id
+        tests: [not_null]
